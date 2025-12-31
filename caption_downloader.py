@@ -403,10 +403,35 @@ class CaptionDownloader:
         if not segments:
             return []
 
+        # Pass 0: Remove very short segments (< 0.25s) whose text is contained in next segment
+        # These are "transition" segments from YouTube's rolling caption export
+        stage0 = []
+        i = 0
+        while i < len(segments):
+            seg = segments[i]
+            duration = seg['end'] - seg['start']
+
+            # Check if this is a very short segment
+            if duration < 0.25 and i + 1 < len(segments):
+                next_seg = segments[i + 1]
+                current_text = seg['text'].lower().strip()
+                next_text = next_seg['text'].lower().strip()
+
+                # Skip if next segment contains or starts with this text
+                if next_text.startswith(current_text) or current_text in next_text:
+                    i += 1
+                    continue
+
+            stage0.append(seg)
+            i += 1
+
+        if len(stage0) <= 1:
+            return stage0
+
         # First pass: remove exact consecutive duplicates
         stage1 = []
         prev_text = None
-        for seg in segments:
+        for seg in stage0:
             if seg['text'] != prev_text:
                 stage1.append(seg)
                 prev_text = seg['text']
@@ -425,22 +450,23 @@ class CaptionDownloader:
             # Check if current is a prefix of next segment
             skip_current = False
             if i + 1 < len(stage1):
-                next_text = stage1[i + 1]['text'].lower().strip()
-                # If current text is the start of next text, skip current
+                next_seg = stage1[i + 1]
+                next_text = next_seg['text'].lower().strip()
+                # If current text is the start of next text, skip current (keep longer)
                 if next_text.startswith(current_text) and len(next_text) > len(current_text):
                     skip_current = True
-                # Also check if current ends with a partial phrase that next starts with
-                elif self._has_rolling_overlap(current_text, next_text):
-                    skip_current = True
+                # Note: rolling overlap cases (where current ends flow into next) are handled
+                # by pass 3 merging, not by skipping
 
             # Check if current is a suffix of previous segment
             if not skip_current and stage2:
                 prev_text = stage2[-1]['text'].lower().strip()
-                # If previous text ends with current text, skip current
+                # If previous text ends with current text, skip current (it's a leftover fragment)
                 if prev_text.endswith(current_text) and len(prev_text) > len(current_text):
                     skip_current = True
-                # Check for rolling overlap from previous
-                elif self._has_rolling_overlap(prev_text, current_text):
+                # Check for rolling overlap from previous - current starts with end of previous
+                # This means current is just a fragment, skip it
+                elif len(current_text) < len(prev_text) and self._has_rolling_overlap(prev_text, current_text):
                     skip_current = True
 
             if not skip_current:

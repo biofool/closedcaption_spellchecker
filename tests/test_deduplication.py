@@ -148,3 +148,47 @@ class TestRollingCaptionDeduplication:
         full_text = ' '.join(seg['text'] for seg in result)
         assert 'what I want you to' in full_text
         assert 'push on me' in full_text
+
+    def test_very_short_transition_segments(self, downloader):
+        """Test removal of very short (<0.25s) transition segments"""
+        # This is the pattern YouTube creates with 0.01s segments
+        segments = [
+            {'start': 160.15, 'end': 160.16, 'text': "Bobb's come and go, but this unit knows"},
+            {'start': 160.16, 'end': 162.15, 'text': "Bobb's come and go, but this unit knows that has a much better history of"},
+            {'start': 162.15, 'end': 162.16, 'text': "that has a much better history of"},
+            {'start': 162.16, 'end': 166.15, 'text': "that has a much better history of things. Has been around forever."},
+            {'start': 166.15, 'end': 166.16, 'text': "things. Has been around forever."},
+            {'start': 166.16, 'end': 167.99, 'text': "things. Has been around forever. Okay."},
+        ]
+
+        result = downloader._deduplicate_rolling_captions(segments)
+
+        # Should remove the 0.01s transition segments
+        # Result should only have the longer segments with full text
+        assert len(result) < len(segments)
+
+        # Check that no very short segments remain (except possibly at the end)
+        for seg in result[:-1]:
+            duration = seg['end'] - seg['start']
+            # Either it's a longer segment, or its text isn't in the next segment
+            assert duration >= 0.25 or 'Okay' in seg['text']
+
+        # The final text should flow properly
+        full_text = ' '.join(seg['text'] for seg in result)
+        assert "Bobb's come and go" in full_text
+        assert "history of" in full_text
+        assert "Okay" in full_text
+
+    def test_short_segment_not_in_next(self, downloader):
+        """Test that short segments are kept if text isn't in the next segment"""
+        segments = [
+            {'start': 0.0, 'end': 0.1, 'text': 'Quick intro'},
+            {'start': 0.1, 'end': 2.0, 'text': 'Now for the main content'},
+        ]
+
+        result = downloader._deduplicate_rolling_captions(segments)
+
+        # Should keep both since they're different text
+        assert len(result) == 2
+        assert result[0]['text'] == 'Quick intro'
+        assert result[1]['text'] == 'Now for the main content'
