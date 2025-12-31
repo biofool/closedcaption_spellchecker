@@ -14,7 +14,12 @@ YouTube's auto-captioning consistently mangles specialized vocabulary. Instead o
 ## Installation
 
 ```bash
-pip install yt-dlp python-dotenv
+pip install -r requirements.txt
+```
+
+Or manually:
+```bash
+pip install yt-dlp python-dotenv google-api-python-client google-auth pytest
 ```
 
 ## Quick Start
@@ -167,6 +172,68 @@ python caption_diff_mapper.py original.json corrected.json -o aikido_terms.json
 
 ---
 
+## App 3: caption_uploader.py
+
+Uploads corrected captions back to YouTube using the YouTube Data API.
+
+### Prerequisites
+
+1. Create a Google Cloud project
+2. Enable the YouTube Data API v3
+3. Create a service account and download the JSON key
+4. Add the service account as a manager on your YouTube channel
+
+### Usage
+
+```bash
+# Upload all videos from a batch file
+python caption_uploader.py captions_batch_1.json
+
+# Upload only a specific video
+python caption_uploader.py captions_batch_1.json --video abc123xyz
+
+# Dry run to see what would be uploaded
+python caption_uploader.py captions_batch_1.json --dry-run
+```
+
+---
+
+## App 4: caption_watermark.py
+
+Adds a timestamp watermark to caption files (appears at the end of captions).
+
+### Usage
+
+```bash
+# Add watermark to a caption file (modifies in place)
+python caption_watermark.py captions_batch_1.json
+
+# Save to a different file
+python caption_watermark.py captions_batch_1.json -o watermarked.json
+
+# Custom timestamp
+python caption_watermark.py captions_batch_1.json -t 2025-01-15-14
+```
+
+The watermark format is: `Closed Captions Updated on YYYY-MM-DD-HH`
+
+---
+
+## Testing
+
+```bash
+# Run unit tests
+pytest
+
+# Run all tests including integration tests (requires credentials)
+pytest --run-integration
+
+# Run specific test file
+pytest tests/test_caption_watermark.py -v
+```
+
+---
+
 ## Environment Variables
 
 Set these in your `.env` file:
@@ -175,6 +242,8 @@ Set these in your `.env` file:
 |----------|---------|-------------|
 | `TERMINOLOGY_MAPPING_FILE` | `.cache/terminology_mapping.json` | Path to terminology dictionary |
 | `CACHE_DIR` | `.cache` | Directory for downloads and output |
+| `GOOGLE_SERVICE_ACCOUNT_FILE` | - | Path to service account JSON key |
+| `TEST_VIDEO_ID` | - | Video ID for integration tests |
 
 ---
 
@@ -238,9 +307,20 @@ Set these in your `.env` file:
 .
 ├── caption_downloader.py      # App 1: Download and concatenate
 ├── caption_diff_mapper.py     # App 2: Diff and build mappings
+├── caption_uploader.py        # App 3: Upload to YouTube
+├── caption_watermark.py       # App 4: Add timestamp watermarks
+├── vtt_formatter.py           # VTT format conversion utility
+├── requirements.txt           # Python dependencies
+├── pytest.ini                 # Test configuration
 ├── .env                       # Configuration
 ├── .env.example               # Configuration template
 ├── terminology_mapping_example.json  # Starter dictionary
+├── tests/                     # Test suite
+│   ├── conftest.py
+│   ├── test_vtt_formatter.py
+│   ├── test_caption_watermark.py
+│   ├── test_caption_uploader.py
+│   └── test_round_trip.py
 └── .cache/
     ├── captions/              # Downloaded VTT files
     ├── output/                # JSON batch files
