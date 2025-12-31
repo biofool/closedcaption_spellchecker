@@ -383,15 +383,129 @@ class CaptionDownloader:
                 'text': clean_text
             })
         
-        # Deduplicate consecutive identical lines
-        deduped = []
+        # Deduplicate using smart rolling caption detection
+        deduped = self._deduplicate_rolling_captions(segments)
+
+        return deduped
+
+    def _deduplicate_rolling_captions(self, segments: List[Dict]) -> List[Dict]:
+        """
+        Remove duplicates caused by YouTube's 2-line rolling caption style.
+
+        YouTube exports captions where each timing block shows 2 lines, and the
+        timing overlaps. This causes text to appear multiple times:
+        - "Okay. So, Shane,"
+        - "Okay. So, Shane, um, push on me a little bit."
+        - "um, push on me a little bit."
+
+        This method detects and removes these overlapping duplicates.
+        """
+        if not segments:
+            return []
+
+        # First pass: remove exact consecutive duplicates
+        stage1 = []
         prev_text = None
         for seg in segments:
             if seg['text'] != prev_text:
-                deduped.append(seg)
+                stage1.append(seg)
                 prev_text = seg['text']
-        
-        return deduped
+
+        if len(stage1) <= 1:
+            return stage1
+
+        # Second pass: remove segments that are substrings of adjacent segments
+        # (handles the rolling caption overlap)
+        stage2 = []
+        i = 0
+        while i < len(stage1):
+            current = stage1[i]
+            current_text = current['text'].lower().strip()
+
+            # Check if current is a prefix of next segment
+            skip_current = False
+            if i + 1 < len(stage1):
+                next_text = stage1[i + 1]['text'].lower().strip()
+                # If current text is the start of next text, skip current
+                if next_text.startswith(current_text) and len(next_text) > len(current_text):
+                    skip_current = True
+                # Also check if current ends with a partial phrase that next starts with
+                elif self._has_rolling_overlap(current_text, next_text):
+                    skip_current = True
+
+            # Check if current is a suffix of previous segment
+            if not skip_current and stage2:
+                prev_text = stage2[-1]['text'].lower().strip()
+                # If previous text ends with current text, skip current
+                if prev_text.endswith(current_text) and len(prev_text) > len(current_text):
+                    skip_current = True
+                # Check for rolling overlap from previous
+                elif self._has_rolling_overlap(prev_text, current_text):
+                    skip_current = True
+
+            if not skip_current:
+                stage2.append(current)
+
+            i += 1
+
+        # Third pass: merge segments with significant overlap
+        result = []
+        for seg in stage2:
+            if not result:
+                result.append(seg)
+                continue
+
+            prev = result[-1]
+            overlap = self._find_text_overlap(prev['text'], seg['text'])
+
+            if overlap and len(overlap) > 10:  # Significant overlap
+                # Merge by extending previous segment
+                merged_text = prev['text'] + seg['text'][len(overlap):]
+                result[-1] = {
+                    'start': prev['start'],
+                    'end': seg['end'],
+                    'text': merged_text
+                }
+            else:
+                result.append(seg)
+
+        return result
+
+    def _has_rolling_overlap(self, text1: str, text2: str) -> bool:
+        """
+        Check if text2 starts with the end of text1 (rolling caption pattern).
+        Returns True if there's significant overlap suggesting rolling captions.
+        """
+        # Look for overlap of at least 3 words
+        words1 = text1.split()
+        words2 = text2.split()
+
+        if len(words1) < 2 or len(words2) < 2:
+            return False
+
+        # Check if text2 starts with the last 2-4 words of text1
+        for overlap_size in range(min(4, len(words1)), 1, -1):
+            end_of_text1 = ' '.join(words1[-overlap_size:])
+            start_of_text2 = ' '.join(words2[:overlap_size])
+            if end_of_text1.lower() == start_of_text2.lower():
+                return True
+
+        return False
+
+    def _find_text_overlap(self, text1: str, text2: str) -> str:
+        """
+        Find the overlapping text where text1 ends and text2 begins.
+        Returns the overlapping portion, or empty string if no significant overlap.
+        """
+        # Check progressively smaller suffixes of text1 against prefixes of text2
+        min_overlap = 5  # Minimum characters to consider as overlap
+
+        for i in range(len(text1) - min_overlap, -1, -1):
+            suffix = text1[i:]
+            if text2.lower().startswith(suffix.lower()):
+                return suffix
+
+        return ""
     
     def _time_to_seconds(self, time_str: str) -> float:
         """Convert HH:MM:SS.mmm to seconds"""
@@ -492,7 +606,8 @@ Examples:
   python caption_downloader.py --playlist "https://www.youtube.com/playlist?list=PLsY5cGNN2qQMuvKWVPrQTjhkfxkJztu1W"
 
   # Download specific batch size
-  python caption_downloader.py --channel "https://www.youtube.com/@YourChannel" --batch-size 8
+  python caption_downloader.py --channel "https://www.youtube.com/@YourChannel" 
+  
   
   # Download multiple batches (32 videos in 2 batches of 16)
   python caption_downloader.py --channel "https://www.youtube.com/@YourChannel" --batches 2
