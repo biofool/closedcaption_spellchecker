@@ -45,6 +45,9 @@ python caption_uploader.py captions.json
 # Upload specific video only
 python caption_uploader.py captions.json --video abc123xyz
 
+# Launch GUI to track spell-check status
+python spellcheck_gui.py
+
 # Run tests
 pytest
 
@@ -78,6 +81,18 @@ pytest --run-integration
 - `seconds_to_vtt_timestamp()`: Converts float seconds to VTT timestamp format
 - `segments_to_vtt()`: Converts JSON segments to WebVTT string
 - Used by uploader to generate VTT files for YouTube
+
+### spellcheck_tracker.py
+- `VideoStatus`: Dataclass tracking spell-check status per video
+- `SpellcheckTracker`: Manages spellcheck_status.json and originals/ backup
+- Automatically backs up original captions before any processing
+- Tracks: spell_checked, spell_check_date, last_uploaded_date
+
+### spellcheck_gui.py
+- PySide6 GUI application for viewing and managing spell-check status
+- `VideoTableModel`: Table model displaying video status
+- `VideoFilterProxyModel`: Filtering by status and date
+- Actions: open in browser, view original, mark as checked, export
 
 ### Data Flow
 ```
@@ -114,3 +129,5 @@ Set in `.env` file:
 - Downloaded caption files are cached in `.cache/captions/` to avoid re-downloading
 - YouTube upload requires service account with channel manager permissions
 - Watermark is placed at end of captions with configurable gap (default 2s) and duration (default 3s)
+- Original captions are backed up to `originals/` directory (committed to git) before processing
+- Spell-check status tracked in `spellcheck_status.json` (committed to git)

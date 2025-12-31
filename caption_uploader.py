@@ -58,6 +58,7 @@ except ImportError:
     logger.warning("Google API libraries not installed. Run: pip install google-api-python-client google-auth")
 
 from vtt_formatter import segments_to_vtt, save_vtt
+from spellcheck_tracker import SpellcheckTracker
 
 
 @dataclass
@@ -81,6 +82,7 @@ class CaptionUploader:
         self.youtube = self._get_youtube_service()
         self.temp_dir = TEMP_DIR
         self.temp_dir.mkdir(parents=True, exist_ok=True)
+        self.tracker = SpellcheckTracker()
 
     def _get_credentials(self):
         """Load service account credentials"""
@@ -208,6 +210,9 @@ class CaptionUploader:
             caption_id = response['id']
 
             logger.info(f"Uploaded caption {caption_id} to video {video_id}")
+
+            # Update tracker with upload timestamp
+            self.tracker.mark_uploaded(video_id)
 
             # Clean up temp file
             vtt_path.unlink(missing_ok=True)

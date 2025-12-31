@@ -20,6 +20,9 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Import tracker (after load_dotenv so env vars are available)
+from spellcheck_tracker import SpellcheckTracker
+
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
@@ -32,7 +35,7 @@ LOG_DIR = CACHE_DIR / "logs"
 MAPPING_FILE = Path(os.getenv("TERMINOLOGY_MAPPING_FILE", ".cache/terminology_mapping.json"))
 
 # Batch size
-BATCH_SIZE = 16
+BATCH_SIZE = 1
 
 # Create directories
 for directory in [CACHE_DIR, CAPTIONS_DIR, OUTPUT_DIR, LOG_DIR]:
@@ -184,11 +187,12 @@ class TerminologyMapper:
 # ============================================================================
 class CaptionDownloader:
     """Downloads and processes YouTube captions"""
-    
+
     def __init__(self):
         self.captions_dir = CAPTIONS_DIR
         self.output_dir = OUTPUT_DIR
         self.mapper = TerminologyMapper(MAPPING_FILE)
+        self.tracker = SpellcheckTracker()
     
     def get_channel_videos(self, channel_url: str, max_videos: int = 16) -> List[VideoInfo]:
         """Get recent videos from a channel"""
@@ -310,14 +314,16 @@ class CaptionDownloader:
     def download_captions(self, video: VideoInfo) -> Optional[Path]:
         """Download captions for a single video"""
         logger.debug(f"Downloading captions for: {video.video_id}")
-        
+
         # Check for existing caption file
         for ext in ['.en.vtt', '.en.srt']:
             existing = self.captions_dir / f"{video.video_id}{ext}"
             if existing.exists():
                 logger.debug(f"Using cached captions: {existing}")
+                # Backup original if not already done
+                self.tracker.backup_original(video.video_id, existing)
                 return existing
-        
+
         ydl_opts = {
             'writesubtitles': True,
             'writeautomaticsub': True,
@@ -326,21 +332,24 @@ class CaptionDownloader:
             'outtmpl': str(self.captions_dir / video.video_id),
             'quiet': True,
         }
-        
+
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([video.url])
-            
+
             # Find the downloaded file
             for pattern in [f"{video.video_id}.en*.vtt", f"{video.video_id}.en*.srt",
                           f"{video.video_id}*.vtt", f"{video.video_id}*.srt"]:
                 matches = list(self.captions_dir.glob(pattern))
                 if matches:
-                    return matches[0]
-            
+                    caption_file = matches[0]
+                    # Backup original BEFORE any processing
+                    self.tracker.backup_original(video.video_id, caption_file)
+                    return caption_file
+
             logger.warning(f"No captions found for {video.video_id}")
             return None
-            
+
         except Exception as e:
             logger.error(f"Error downloading captions for {video.video_id}: {e}")
             return None
@@ -426,7 +435,16 @@ class CaptionDownloader:
                 'segments': segments,
                 'full_text': full_text
             })
-            
+
+            # Register video in tracker
+            self.tracker.register_video(
+                video_id=video.video_id,
+                title=video.title,
+                url=video.url,
+                upload_date=video.upload_date,
+                caption_file=caption_file
+            )
+
             logger.info(f"    Processed {len(segments)} segments")
         
         batch = CaptionBatch(
@@ -465,11 +483,14 @@ def main():
         epilog="""
 Examples:
   # Download from a channel (most recent 16 videos)
-  python caption_downloader.py --channel "https://www.youtube.com/@YourChannel"
-  
-  # Download from a playlist
-  python caption_downloader.py --playlist "https://www.youtube.com/playlist?list=PLxxxxx"
-  
+● To download from a channel or playlist:
+
+  # For channel @moonsensei:
+  python caption_downloader.py --channel "https://www.youtube.com/@moonsensei"
+
+  # For that specific playlist:
+  python caption_downloader.py --playlist "https://www.youtube.com/playlist?list=PLsY5cGNN2qQMuvKWVPrQTjhkfxkJztu1W"
+
   # Download specific batch size
   python caption_downloader.py --channel "https://www.youtube.com/@YourChannel" --batch-size 8
   
