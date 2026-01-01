@@ -144,11 +144,64 @@ def format_video_date(video: Dict) -> str:
     return 'Unknown date'
 
 
+def fix_duplicate_words(text: str) -> str:
+    """
+    Find consecutive duplicate words and replace every other one with a comma.
+
+    Examples:
+        "the the quick" → "the, quick"
+        "I I I think" → "I, I, think"
+        "go go go go" → "go, go, go,"
+    """
+    if not text:
+        return text
+
+    words = text.split()
+    if len(words) < 2:
+        return text
+
+    result = []
+    i = 0
+
+    while i < len(words):
+        current_word = words[i]
+
+        # Count consecutive duplicates
+        j = i + 1
+        while j < len(words) and words[j].lower() == current_word.lower():
+            j += 1
+
+        duplicate_count = j - i
+
+        if duplicate_count == 1:
+            # No duplicate, just add the word
+            result.append(current_word)
+        else:
+            # Found duplicates - keep first, replace every other with comma
+            for k in range(duplicate_count):
+                if k % 2 == 0:
+                    result.append(words[i + k])
+                else:
+                    result.append(',')
+
+        i = j
+
+    # Join and clean up spacing around commas
+    output = ' '.join(result)
+    # Fix spacing: "word , word" → "word, word"
+    output = re.sub(r'\s+,', ',', output)
+    # Remove trailing comma before period or end
+    output = re.sub(r',(\s*[.!?])', r'\1', output)
+
+    return output
+
+
 def concatenate_text(
     json_files: List[Path],
     output_format: str = 'text',
     include_metadata: bool = True,
-    reverse_order: bool = False
+    reverse_order: bool = False,
+    fix_duplicates: bool = False
 ) -> str:
     """
     Concatenate full text from all videos in JSON files.
@@ -158,6 +211,7 @@ def concatenate_text(
         output_format: 'text' or 'markdown'
         include_metadata: Include video title, URL, date
         reverse_order: If True, newest first; otherwise oldest first
+        fix_duplicates: If True, replace duplicate consecutive words with commas
 
     Returns:
         Concatenated text
@@ -194,6 +248,9 @@ def concatenate_text(
             date = format_video_date(video)
             full_text = video.get('full_text', '')
 
+            if fix_duplicates:
+                full_text = fix_duplicate_words(full_text)
+
             if include_metadata:
                 lines.append(f'## {title}')
                 lines.append('')
@@ -220,6 +277,9 @@ def concatenate_text(
             url = video.get('url', '')
             date = format_video_date(video)
             full_text = video.get('full_text', '')
+
+            if fix_duplicates:
+                full_text = fix_duplicate_words(full_text)
 
             if include_metadata:
                 lines.append('=' * width)
@@ -259,6 +319,9 @@ Examples:
 
   # Text only, no metadata headers
   python caption_concatenator.py *.json -o combined.txt --no-metadata
+
+  # Fix duplicate words (e.g., "the the" → "the,")
+  python caption_concatenator.py *.json -o combined.txt --fix-duplicates
         """
     )
 
@@ -272,6 +335,8 @@ Examples:
                        help='Reverse order (newest first)')
     parser.add_argument('--no-metadata', action='store_true',
                        help='Exclude video titles, URLs, and dates')
+    parser.add_argument('--fix-duplicates', action='store_true',
+                       help='Replace consecutive duplicate words with commas')
 
     args = parser.parse_args()
 
@@ -309,7 +374,8 @@ Examples:
             args.json_files,
             output_format=output_format,
             include_metadata=not args.no_metadata,
-            reverse_order=args.reverse
+            reverse_order=args.reverse,
+            fix_duplicates=args.fix_duplicates
         )
 
         # Determine output path

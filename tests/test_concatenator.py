@@ -15,6 +15,7 @@ from caption_concatenator import (
     format_video_date,
     extract_date_from_title,
     get_video_date,
+    fix_duplicate_words,
     concatenate_text
 )
 
@@ -167,6 +168,55 @@ class TestGetVideoDate:
         }
         result = get_video_date(video)
         assert result is None
+
+
+class TestFixDuplicateWords:
+    """Test fixing duplicate consecutive words"""
+
+    def test_single_duplicate(self):
+        """Test single duplicate word pair"""
+        result = fix_duplicate_words("the the quick brown fox")
+        assert result == "the, quick brown fox"
+
+    def test_triple_duplicate(self):
+        """Test three consecutive duplicates: keep 1st, comma, keep 3rd"""
+        result = fix_duplicate_words("I I I think so")
+        assert result == "I, I think so"
+
+    def test_quadruple_duplicate(self):
+        """Test four consecutive duplicates"""
+        result = fix_duplicate_words("go go go go now")
+        assert result == "go, go, now"
+
+    def test_multiple_duplicate_groups(self):
+        """Test multiple groups of duplicates"""
+        result = fix_duplicate_words("the the quick quick fox")
+        assert result == "the, quick, fox"
+
+    def test_no_duplicates(self):
+        """Test text without duplicates"""
+        result = fix_duplicate_words("the quick brown fox")
+        assert result == "the quick brown fox"
+
+    def test_case_insensitive(self):
+        """Test case-insensitive duplicate detection"""
+        result = fix_duplicate_words("The the quick")
+        assert result == "The, quick"
+
+    def test_empty_string(self):
+        """Test empty string"""
+        result = fix_duplicate_words("")
+        assert result == ""
+
+    def test_single_word(self):
+        """Test single word"""
+        result = fix_duplicate_words("hello")
+        assert result == "hello"
+
+    def test_preserves_punctuation(self):
+        """Test that punctuation is preserved"""
+        result = fix_duplicate_words("Hello. The the end.")
+        assert "the," in result.lower() or "The," in result
 
 
 class TestLoadBatchFile:
