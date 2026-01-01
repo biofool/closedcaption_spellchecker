@@ -320,8 +320,8 @@ Examples:
   # Text only, no metadata headers
   python caption_concatenator.py *.json -o combined.txt --no-metadata
 
-  # Fix duplicate words (e.g., "the the" → "the,")
-  python caption_concatenator.py *.json -o combined.txt --fix-duplicates
+  # Disable duplicate word fixing
+  python caption_concatenator.py *.json -o combined.txt --no-dedup
         """
     )
 
@@ -335,8 +335,8 @@ Examples:
                        help='Reverse order (newest first)')
     parser.add_argument('--no-metadata', action='store_true',
                        help='Exclude video titles, URLs, and dates')
-    parser.add_argument('--fix-duplicates', action='store_true',
-                       help='Replace consecutive duplicate words with commas')
+    parser.add_argument('--no-dedup', action='store_true',
+                       help='Disable fixing of consecutive duplicate words (enabled by default)')
 
     args = parser.parse_args()
 
@@ -375,7 +375,7 @@ Examples:
             output_format=output_format,
             include_metadata=not args.no_metadata,
             reverse_order=args.reverse,
-            fix_duplicates=args.fix_duplicates
+            fix_duplicates=not args.no_dedup
         )
 
         # Determine output path
