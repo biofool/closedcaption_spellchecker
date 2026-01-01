@@ -782,8 +782,8 @@ Environment Variables (set in .env):
     parser.add_argument('--input', '-i', type=Path,
                        help='Read URLs from file (one per line, # for comments)')
 
-    parser.add_argument('--batch-size', '-b', type=int, default=int(BATCH_SIZE),
-                       help=f'Videos per batch (default: {BATCH_SIZE})')
+    parser.add_argument('--batch-size', '-b', type=int, default=None,
+                       help=f'Videos per batch (default: all videos if batches=1, else {BATCH_SIZE})')
     parser.add_argument('--batches', '-n', type=int, default=1,
                        help='Number of batches to download (default: 1)')
     parser.add_argument('--max-per-source', type=int, default=100,
@@ -855,20 +855,31 @@ Environment Variables (set in .env):
         print("❌ No videos found")
         sys.exit(1)
 
+    # Determine batch size
+    # If batch-size not specified and batches=1, process all videos in one batch
+    # Otherwise use specified batch-size or default from BATCH_SIZE env var
+    if args.batch_size is None:
+        if args.batches == 1:
+            batch_size = len(videos)  # All videos in one batch
+        else:
+            batch_size = int(BATCH_SIZE)
+    else:
+        batch_size = args.batch_size
+
     # Calculate total videos needed
-    total_videos = args.batch_size * args.batches
+    total_videos = batch_size * args.batches
     videos = videos[:total_videos]
 
     print(f"📺 Found {len(videos)} unique videos")
 
     # Process in batches
     output_files = []
-    total_batches = (len(videos) + args.batch_size - 1) // args.batch_size
+    total_batches = (len(videos) + batch_size - 1) // batch_size
     total_batches = min(total_batches, args.batches)
 
     for batch_num in range(1, total_batches + 1):
-        start_idx = (batch_num - 1) * args.batch_size
-        end_idx = start_idx + args.batch_size
+        start_idx = (batch_num - 1) * batch_size
+        end_idx = start_idx + batch_size
         batch_videos = videos[start_idx:end_idx]
 
         if not batch_videos:
