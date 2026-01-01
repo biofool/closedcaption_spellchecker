@@ -153,6 +153,9 @@ Examples:
   # Output as markdown
   python caption_concatenator.py *.json -o combined.md --format markdown
 
+  # Output both text and markdown
+  python caption_concatenator.py *.json -o combined -f text,markdown
+
   # Newest videos first
   python caption_concatenator.py *.json -o combined.txt --reverse
 
@@ -164,9 +167,9 @@ Examples:
     parser.add_argument('json_files', nargs='+', type=Path,
                        help='Caption batch JSON files to concatenate')
     parser.add_argument('-o', '--output', type=Path, required=True,
-                       help='Output file path')
-    parser.add_argument('-f', '--format', choices=['text', 'markdown'],
-                       default='text', help='Output format (default: text)')
+                       help='Output file path (extension added automatically for multiple formats)')
+    parser.add_argument('-f', '--format', default='text',
+                       help='Output format(s): text, markdown, or both (e.g., "text,markdown")')
     parser.add_argument('--reverse', action='store_true',
                        help='Reverse order (newest first)')
     parser.add_argument('--no-metadata', action='store_true',
@@ -180,30 +183,53 @@ Examples:
             print(f"Error: File not found: {json_file}")
             return 1
 
-    # Auto-detect format from output extension
-    output_format = args.format
-    if args.output.suffix.lower() == '.md':
-        output_format = 'markdown'
+    # Parse format(s)
+    formats = [f.strip().lower() for f in args.format.split(',')]
+    valid_formats = {'text', 'markdown'}
+    for fmt in formats:
+        if fmt not in valid_formats:
+            print(f"Error: Invalid format '{fmt}'. Use 'text' or 'markdown'")
+            return 1
+
+    # Auto-detect format from output extension if single format not specified
+    if len(formats) == 1 and formats[0] == 'text':
+        if args.output.suffix.lower() == '.md':
+            formats = ['markdown']
 
     print(f"Processing {len(args.json_files)} file(s)...")
-
-    # Concatenate
-    result = concatenate_text(
-        args.json_files,
-        output_format=output_format,
-        include_metadata=not args.no_metadata,
-        reverse_order=args.reverse
-    )
 
     # Count videos
     total_videos = sum(len(load_batch_file(f)) for f in args.json_files)
 
-    # Write output
-    args.output.write_text(result, encoding='utf-8')
+    # Generate output for each format
+    output_files = []
+    format_extensions = {'text': '.txt', 'markdown': '.md'}
+
+    for output_format in formats:
+        # Concatenate
+        result = concatenate_text(
+            args.json_files,
+            output_format=output_format,
+            include_metadata=not args.no_metadata,
+            reverse_order=args.reverse
+        )
+
+        # Determine output path
+        if len(formats) == 1:
+            # Single format: use output path as-is
+            output_path = args.output
+        else:
+            # Multiple formats: add extension to base name
+            base = args.output.with_suffix('')  # Remove any existing extension
+            output_path = base.with_suffix(format_extensions[output_format])
+
+        # Write output
+        output_path.write_text(result, encoding='utf-8')
+        output_files.append((output_format, output_path))
 
     print(f"Concatenated {total_videos} videos")
-    print(f"Output: {args.output}")
-    print(f"Format: {output_format}")
+    for fmt, path in output_files:
+        print(f"Output ({fmt}): {path}")
     if args.reverse:
         print("Order: Newest first")
     else:
