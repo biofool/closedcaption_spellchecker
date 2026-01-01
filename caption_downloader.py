@@ -35,7 +35,7 @@ LOG_DIR = CACHE_DIR / "logs"
 MAPPING_FILE = Path(os.getenv("TERMINOLOGY_MAPPING_FILE", ".cache/terminology_mapping.json"))
 
 # Batch size
-BATCH_SIZE = 1
+BATCH_SIZE =  os.getenv("BATCH_SIZE", 8)
 
 # Create directories
 for directory in [CACHE_DIR, CAPTIONS_DIR, OUTPUT_DIR, LOG_DIR]:
@@ -193,7 +193,126 @@ class CaptionDownloader:
         self.output_dir = OUTPUT_DIR
         self.mapper = TerminologyMapper(MAPPING_FILE)
         self.tracker = SpellcheckTracker()
-    
+
+    @staticmethod
+    def detect_url_type(url: str) -> str:
+        """
+        Auto-detect the type of YouTube URL.
+
+        Returns: 'channel', 'playlist', 'video', or 'unknown'
+        """
+        url = url.strip()
+
+        # Channel patterns
+        if '/@' in url or '/channel/' in url or '/c/' in url or '/user/' in url:
+            return 'channel'
+
+        # Playlist patterns (check before video since URLs can have both)
+        if 'list=' in url and 'watch?v=' not in url:
+            return 'playlist'
+        if 'playlist?list=' in url:
+            return 'playlist'
+        if 'studio.youtube.com' in url and 'playlist/' in url:
+            return 'playlist'
+
+        # Video patterns
+        if 'watch?v=' in url or 'youtu.be/' in url or '/shorts/' in url:
+            return 'video'
+
+        # URL with both video and list - treat as video (single video from playlist)
+        if 'watch?v=' in url and 'list=' in url:
+            return 'video'
+
+        return 'unknown'
+
+    def get_single_video(self, video_url: str) -> Optional[VideoInfo]:
+        """Get info for a single video"""
+        logger.debug(f"Fetching single video info: {video_url}")
+
+        # Extract video ID from various URL formats
+        video_id = None
+        if 'watch?v=' in video_url:
+            match = re.search(r'watch\?v=([A-Za-z0-9_-]{11})', video_url)
+            if match:
+                video_id = match.group(1)
+        elif 'youtu.be/' in video_url:
+            match = re.search(r'youtu\.be/([A-Za-z0-9_-]{11})', video_url)
+            if match:
+                video_id = match.group(1)
+        elif '/shorts/' in video_url:
+            match = re.search(r'/shorts/([A-Za-z0-9_-]{11})', video_url)
+            if match:
+                video_id = match.group(1)
+
+        if not video_id:
+            logger.error(f"Could not extract video ID from: {video_url}")
+            return None
+
+        ydl_opts = {
+            'quiet': True,
+            'skip_download': True,
+            'ignoreerrors': True,
+        }
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(video_url, download=False)
+
+                if info is None:
+                    return None
+
+                return VideoInfo(
+                    video_id=info.get('id', video_id),
+                    title=info.get('title', 'Unknown'),
+                    url=f"https://www.youtube.com/watch?v={video_id}",
+                    duration=info.get('duration', 0) or 0,
+                    upload_date=info.get('upload_date')
+                )
+        except Exception as e:
+            logger.error(f"Error fetching video {video_url}: {e}")
+            return None
+
+    def get_videos_from_urls(self, urls: List[str], max_per_source: int = 100) -> List[VideoInfo]:
+        """
+        Get videos from a list of URLs (channels, playlists, or videos).
+        Auto-detects URL type and deduplicates results.
+        """
+        all_videos = []
+        seen_ids = set()
+
+        for url in urls:
+            url = url.strip()
+            if not url or url.startswith('#'):
+                continue
+
+            url_type = self.detect_url_type(url)
+            logger.info(f"Processing {url_type}: {url[:60]}...")
+
+            try:
+                if url_type == 'channel':
+                    videos = self.get_channel_videos(url, max_per_source)
+                elif url_type == 'playlist':
+                    videos = self.get_playlist_videos(url, max_per_source)
+                elif url_type == 'video':
+                    video = self.get_single_video(url)
+                    videos = [video] if video else []
+                else:
+                    logger.warning(f"Unknown URL type, skipping: {url}")
+                    continue
+
+                # Deduplicate
+                for video in videos:
+                    if video.video_id not in seen_ids:
+                        seen_ids.add(video.video_id)
+                        all_videos.append(video)
+
+            except Exception as e:
+                logger.error(f"Error processing {url}: {e}")
+                continue
+
+        logger.info(f"Total unique videos collected: {len(all_videos)}")
+        return all_videos
+
     def get_channel_videos(self, channel_url: str, max_videos: int = 16) -> List[VideoInfo]:
         """Get recent videos from a channel"""
         logger.info(f"Fetching up to {max_videos} videos from channel")
@@ -616,54 +735,105 @@ class CaptionDownloader:
 # ============================================================================
 def main():
     import argparse
-    
+
     parser = argparse.ArgumentParser(
         description="Download YouTube captions in batches for spell checking",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Download from a channel (most recent 16 videos)
-● To download from a channel or playlist:
-
-  # For channel @moonsensei:
+  # Download from a channel
   python caption_downloader.py --channel "https://www.youtube.com/@moonsensei"
 
-  # For that specific playlist:
-  python caption_downloader.py --playlist "https://www.youtube.com/playlist?list=PLsY5cGNN2qQMuvKWVPrQTjhkfxkJztu1W"
+  # Download from a playlist
+  python caption_downloader.py --playlist "https://www.youtube.com/playlist?list=PLxxx"
 
-  # Download specific batch size
-  python caption_downloader.py --channel "https://www.youtube.com/@YourChannel" 
-  
-  
-  # Download multiple batches (32 videos in 2 batches of 16)
-  python caption_downloader.py --channel "https://www.youtube.com/@YourChannel" --batches 2
+  # Download specific videos
+  python caption_downloader.py --video "https://www.youtube.com/watch?v=abc123" \\
+                               --video "https://www.youtube.com/watch?v=def456"
+
+  # Mix channels, playlists, and videos
+  python caption_downloader.py --channel "https://www.youtube.com/@channel1" \\
+                               --playlist "https://www.youtube.com/playlist?list=PLxxx" \\
+                               --video "https://www.youtube.com/watch?v=abc123"
+
+  # Read URLs from a file (one per line, # for comments)
+  python caption_downloader.py --input urls.txt
+
+  # Auto-detect URL types
+  python caption_downloader.py --url "https://www.youtube.com/@moonsensei" \\
+                               --url "https://www.youtube.com/watch?v=abc123"
 
 Environment Variables (set in .env):
   TERMINOLOGY_MAPPING_FILE  - Path to terminology mapping JSON
   CACHE_DIR                 - Cache directory (default: .cache)
+  BATCH_SIZE                - Default batch size (default: 8)
         """
     )
-    
-    source_group = parser.add_mutually_exclusive_group(required=True)
-    source_group.add_argument('--channel', '-c', help='YouTube channel URL')
-    source_group.add_argument('--playlist', '-p', help='YouTube playlist URL')
-    
-    parser.add_argument('--batch-size', '-b', type=int, default=16,
-                       help='Videos per batch (default: 16)')
+
+    # Multiple source options (not mutually exclusive)
+    parser.add_argument('--channel', '-c', action='append', default=[],
+                       help='YouTube channel URL (can specify multiple)')
+    parser.add_argument('--playlist', '-p', action='append', default=[],
+                       help='YouTube playlist URL (can specify multiple)')
+    parser.add_argument('--video', '-v', action='append', default=[],
+                       help='YouTube video URL (can specify multiple)')
+    parser.add_argument('--url', '-u', action='append', default=[],
+                       help='Any YouTube URL (auto-detect type, can specify multiple)')
+    parser.add_argument('--input', '-i', type=Path,
+                       help='Read URLs from file (one per line, # for comments)')
+
+    parser.add_argument('--batch-size', '-b', type=int, default=int(BATCH_SIZE),
+                       help=f'Videos per batch (default: {BATCH_SIZE})')
     parser.add_argument('--batches', '-n', type=int, default=1,
                        help='Number of batches to download (default: 1)')
+    parser.add_argument('--max-per-source', type=int, default=100,
+                       help='Max videos per channel/playlist (default: 100)')
     parser.add_argument('--output', '-o', help='Output file path (optional)')
     parser.add_argument('--debug', '-d', action='store_true',
                        help='Enable debug output')
-    
+
     args = parser.parse_args()
-    
+
     if args.debug:
         console_handler.setLevel(logging.DEBUG)
-    
+
+    # Collect all URLs
+    all_urls = []
+
+    # Add explicit channels
+    all_urls.extend(args.channel)
+
+    # Add explicit playlists
+    all_urls.extend(args.playlist)
+
+    # Add explicit videos
+    all_urls.extend(args.video)
+
+    # Add auto-detect URLs
+    all_urls.extend(args.url)
+
+    # Read from input file if specified
+    if args.input:
+        if not args.input.exists():
+            print(f"❌ Input file not found: {args.input}")
+            sys.exit(1)
+
+        with open(args.input, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    all_urls.append(line)
+        print(f"📄 Read {len(all_urls)} URLs from {args.input}")
+
+    # Validate we have at least one source
+    if not all_urls:
+        print("❌ No URLs provided. Use --channel, --playlist, --video, --url, or --input")
+        parser.print_help()
+        sys.exit(1)
+
     # Initialize downloader
     downloader = CaptionDownloader()
-    
+
     # Report mapping status
     if downloader.mapper.is_empty():
         print(f"\n📋 No terminology mappings loaded")
@@ -671,54 +841,54 @@ Environment Variables (set in .env):
     else:
         print(f"\n✅ Loaded {len(downloader.mapper.mappings)} terminology mappings")
         print(f"   from: {MAPPING_FILE}")
-    
-    # Calculate total videos needed
-    total_videos = args.batch_size * args.batches
-    
-    # Fetch videos
-    print(f"\n🔍 Fetching up to {total_videos} videos...")
-    
+
+    # Fetch videos from all sources
+    print(f"\n🔍 Fetching videos from {len(all_urls)} source(s)...")
+
     try:
-        if args.channel:
-            videos = downloader.get_channel_videos(args.channel, total_videos)
-        else:
-            videos = downloader.get_playlist_videos(args.playlist, total_videos)
+        videos = downloader.get_videos_from_urls(all_urls, args.max_per_source)
     except Exception as e:
         print(f"\n❌ Error fetching videos: {e}")
         sys.exit(1)
-    
+
     if not videos:
         print("❌ No videos found")
         sys.exit(1)
-    
-    print(f"📺 Found {len(videos)} videos")
-    
+
+    # Calculate total videos needed
+    total_videos = args.batch_size * args.batches
+    videos = videos[:total_videos]
+
+    print(f"📺 Found {len(videos)} unique videos")
+
     # Process in batches
     output_files = []
-    
-    for batch_num in range(1, args.batches + 1):
+    total_batches = (len(videos) + args.batch_size - 1) // args.batch_size
+    total_batches = min(total_batches, args.batches)
+
+    for batch_num in range(1, total_batches + 1):
         start_idx = (batch_num - 1) * args.batch_size
         end_idx = start_idx + args.batch_size
         batch_videos = videos[start_idx:end_idx]
-        
+
         if not batch_videos:
             break
-        
-        print(f"\n📦 Processing batch {batch_num}/{args.batches} ({len(batch_videos)} videos)...")
-        
+
+        print(f"\n📦 Processing batch {batch_num}/{total_batches} ({len(batch_videos)} videos)...")
+
         batch = downloader.process_batch(batch_videos, batch_num)
-        
-        if args.output and args.batches == 1:
+
+        if args.output and total_batches == 1:
             output_file = Path(args.output)
         else:
             output_file = None
-        
+
         saved_path = downloader.save_batch(batch, output_file)
         output_files.append(saved_path)
-        
+
         print(f"   ✅ Saved: {saved_path}")
         print(f"   📊 {batch.batch_size} videos processed")
-    
+
     # Summary
     print(f"\n{'='*60}")
     print("📋 SUMMARY")
