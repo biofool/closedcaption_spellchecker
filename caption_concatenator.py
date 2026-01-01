@@ -5,6 +5,7 @@ Caption Concatenator - Combine caption files into a single document ordered by d
 
 import json
 import argparse
+import re
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional
@@ -38,9 +39,106 @@ def parse_upload_date(date_str: Optional[str]) -> Optional[datetime]:
     return None
 
 
-def format_date(date_str: Optional[str]) -> str:
+def extract_date_from_title(title: str) -> Optional[datetime]:
+    """
+    Extract date from video title.
+
+    Supports various formats commonly found in titles:
+    - 2024-01-15, 2024/01/15, 2024.01.15
+    - 01-15-2024, 01/15/2024, 01.15.2024
+    - Jan 15, 2024 / January 15, 2024
+    - 15 Jan 2024 / 15 January 2024
+    """
+    if not title:
+        return None
+
+    # Pattern 1: YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD
+    match = re.search(r'(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})', title)
+    if match:
+        try:
+            year, month, day = int(match.group(1)), int(match.group(2)), int(match.group(3))
+            return datetime(year, month, day)
+        except ValueError:
+            pass
+
+    # Pattern 2: MM-DD-YYYY, MM/DD/YYYY, MM.DD.YYYY
+    match = re.search(r'(\d{1,2})[-/.](\d{1,2})[-/.](20\d{2})', title)
+    if match:
+        try:
+            month, day, year = int(match.group(1)), int(match.group(2)), int(match.group(3))
+            return datetime(year, month, day)
+        except ValueError:
+            pass
+
+    # Pattern 3: Month name DD, YYYY (e.g., "Jan 15, 2024" or "January 15, 2024")
+    months = {
+        'jan': 1, 'january': 1, 'feb': 2, 'february': 2, 'mar': 3, 'march': 3,
+        'apr': 4, 'april': 4, 'may': 5, 'jun': 6, 'june': 6,
+        'jul': 7, 'july': 7, 'aug': 8, 'august': 8, 'sep': 9, 'september': 9,
+        'oct': 10, 'october': 10, 'nov': 11, 'november': 11, 'dec': 12, 'december': 12
+    }
+
+    match = re.search(
+        r'(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|'
+        r'july?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)'
+        r'\s+(\d{1,2})(?:st|nd|rd|th)?,?\s*(20\d{2})',
+        title, re.IGNORECASE
+    )
+    if match:
+        try:
+            month = months[match.group(1).lower()]
+            day = int(match.group(2))
+            year = int(match.group(3))
+            return datetime(year, month, day)
+        except (ValueError, KeyError):
+            pass
+
+    # Pattern 4: DD Month YYYY (e.g., "15 Jan 2024" or "15 January 2024")
+    match = re.search(
+        r'(\d{1,2})(?:st|nd|rd|th)?\s+'
+        r'(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|'
+        r'july?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)'
+        r',?\s*(20\d{2})',
+        title, re.IGNORECASE
+    )
+    if match:
+        try:
+            day = int(match.group(1))
+            month = months[match.group(2).lower()]
+            year = int(match.group(3))
+            return datetime(year, month, day)
+        except (ValueError, KeyError):
+            pass
+
+    return None
+
+
+def get_video_date(video: Dict) -> Optional[datetime]:
+    """
+    Get the best available date for a video.
+    Priority: upload_date > date extracted from title
+    """
+    # First try the upload_date field
+    upload_date = parse_upload_date(video.get('upload_date'))
+    if upload_date:
+        return upload_date
+
+    # Fall back to extracting from title
+    title = video.get('title', '')
+    return extract_date_from_title(title)
+
+
+def format_date_str(date_str: Optional[str]) -> str:
     """Format date string for display"""
     dt = parse_upload_date(date_str)
+    if dt:
+        return dt.strftime('%Y-%m-%d')
+    return 'Unknown date'
+
+
+def format_video_date(video: Dict) -> str:
+    """Format the best available date for a video"""
+    dt = get_video_date(video)
     if dt:
         return dt.strftime('%Y-%m-%d')
     return 'Unknown date'
@@ -70,9 +168,9 @@ def concatenate_text(
         videos = load_batch_file(json_path)
         all_videos.extend(videos)
 
-    # Sort by upload date
+    # Sort by date (upload_date or extracted from title)
     def sort_key(video):
-        dt = parse_upload_date(video.get('upload_date'))
+        dt = get_video_date(video)
         if dt:
             return dt
         # Put videos without dates at the end
@@ -93,7 +191,7 @@ def concatenate_text(
         for video in all_videos:
             title = video.get('title', 'Untitled')
             url = video.get('url', '')
-            date = format_date(video.get('upload_date'))
+            date = format_video_date(video)
             full_text = video.get('full_text', '')
 
             if include_metadata:
@@ -120,7 +218,7 @@ def concatenate_text(
         for video in all_videos:
             title = video.get('title', 'Untitled')
             url = video.get('url', '')
-            date = format_date(video.get('upload_date'))
+            date = format_video_date(video)
             full_text = video.get('full_text', '')
 
             if include_metadata:

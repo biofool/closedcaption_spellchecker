@@ -11,7 +11,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from caption_concatenator import (
     load_batch_file,
     parse_upload_date,
-    format_date,
+    format_date_str,
+    format_video_date,
+    extract_date_from_title,
+    get_video_date,
     concatenate_text
 )
 
@@ -82,13 +85,88 @@ class TestFormatDate:
 
     def test_format_yyyymmdd(self):
         """Test formatting YYYYMMDD date"""
-        result = format_date("20240115")
+        result = format_date_str("20240115")
         assert result == "2024-01-15"
 
     def test_format_none(self):
         """Test formatting None date"""
-        result = format_date(None)
+        result = format_date_str(None)
         assert result == "Unknown date"
+
+
+class TestExtractDateFromTitle:
+    """Test extracting dates from video titles"""
+
+    def test_yyyy_mm_dd_dash(self):
+        """Test YYYY-MM-DD format"""
+        result = extract_date_from_title("Aikido Class 2024-01-15 Morning Session")
+        assert result == datetime(2024, 1, 15)
+
+    def test_yyyy_mm_dd_slash(self):
+        """Test YYYY/MM/DD format"""
+        result = extract_date_from_title("Class 2024/01/15")
+        assert result == datetime(2024, 1, 15)
+
+    def test_mm_dd_yyyy(self):
+        """Test MM-DD-YYYY format"""
+        result = extract_date_from_title("Class 01-15-2024")
+        assert result == datetime(2024, 1, 15)
+
+    def test_month_name_format(self):
+        """Test 'Jan 15, 2024' format"""
+        result = extract_date_from_title("Aikido Class Jan 15, 2024")
+        assert result == datetime(2024, 1, 15)
+
+    def test_full_month_name(self):
+        """Test 'January 15, 2024' format"""
+        result = extract_date_from_title("Aikido Class January 15, 2024")
+        assert result == datetime(2024, 1, 15)
+
+    def test_day_month_year(self):
+        """Test '15 Jan 2024' format"""
+        result = extract_date_from_title("Class 15 Jan 2024")
+        assert result == datetime(2024, 1, 15)
+
+    def test_no_date_in_title(self):
+        """Test title without date"""
+        result = extract_date_from_title("Aikido Introduction Video")
+        assert result is None
+
+    def test_empty_title(self):
+        """Test empty title"""
+        result = extract_date_from_title("")
+        assert result is None
+
+
+class TestGetVideoDate:
+    """Test getting best date from video"""
+
+    def test_prefers_upload_date(self):
+        """Test that upload_date is preferred over title"""
+        video = {
+            'title': 'Class 2024-01-20',
+            'upload_date': '20240115'
+        }
+        result = get_video_date(video)
+        assert result == datetime(2024, 1, 15)
+
+    def test_falls_back_to_title(self):
+        """Test fallback to title when no upload_date"""
+        video = {
+            'title': 'Aikido Class 2024-01-15',
+            'upload_date': None
+        }
+        result = get_video_date(video)
+        assert result == datetime(2024, 1, 15)
+
+    def test_no_date_available(self):
+        """Test when no date is available"""
+        video = {
+            'title': 'Aikido Introduction',
+            'upload_date': None
+        }
+        result = get_video_date(video)
+        assert result is None
 
 
 class TestLoadBatchFile:
