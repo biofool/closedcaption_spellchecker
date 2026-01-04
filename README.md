@@ -242,6 +242,7 @@ Set these in your `.env` file:
 |----------|---------|-------------|
 | `TERMINOLOGY_MAPPING_FILE` | `.cache/terminology_mapping.json` | Path to terminology dictionary |
 | `CACHE_DIR` | `.cache` | Directory for downloads and output |
+| `BATCH_SIZE` | `8` | Default videos per batch |
 | `GOOGLE_SERVICE_ACCOUNT_FILE` | - | Path to service account JSON key |
 | `TEST_VIDEO_ID` | - | Video ID for integration tests |
 
