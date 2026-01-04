@@ -203,27 +203,68 @@ class CaptionDownloader:
         """
         url = url.strip()
 
-        # Channel patterns
+        # Channel patterns (including YouTube Studio)
         if '/@' in url or '/channel/' in url or '/c/' in url or '/user/' in url:
             return 'channel'
 
         # Playlist patterns (check before video since URLs can have both)
-        if 'list=' in url and 'watch?v=' not in url:
-            return 'playlist'
         if 'playlist?list=' in url:
             return 'playlist'
         if 'studio.youtube.com' in url and 'playlist/' in url:
             return 'playlist'
+        # watch?list= without v= is a playlist
+        if 'list=' in url and 'watch?v=' not in url:
+            return 'playlist'
 
-        # Video patterns
+        # Video patterns (including video+list context which is treated as single video)
         if 'watch?v=' in url or 'youtu.be/' in url or '/shorts/' in url:
             return 'video'
 
-        # URL with both video and list - treat as video (single video from playlist)
-        if 'watch?v=' in url and 'list=' in url:
-            return 'video'
-
         return 'unknown'
+
+    @staticmethod
+    def extract_playlist_id(url: str) -> Optional[str]:
+        """
+        Extract playlist ID from various YouTube URL formats.
+
+        Supports:
+        - https://www.youtube.com/playlist?list=PLxxxxx
+        - https://www.youtube.com/watch?v=xxx&list=PLxxxxx
+        - https://www.youtube.com/watch?list=PLxxxxx
+        - https://studio.youtube.com/playlist/PLxxxxx/videos
+
+        Returns: Playlist ID or None if not found
+        """
+        url = url.strip()
+
+        # Studio format: studio.youtube.com/playlist/PLxxxxx/...
+        match = re.search(r'studio\.youtube\.com/playlist/([A-Za-z0-9_-]+)', url)
+        if match:
+            return match.group(1)
+
+        # Standard format: list=PLxxxxx
+        match = re.search(r'list=([A-Za-z0-9_-]+)', url)
+        if match:
+            return match.group(1)
+
+        return None
+
+    @staticmethod
+    def convert_to_standard_url(url: str) -> str:
+        """
+        Convert YouTube Studio or other special URLs to standard format.
+
+        This helps yt-dlp handle URLs it might not recognize directly.
+        """
+        url = url.strip()
+
+        # Convert studio playlist URL to standard format
+        if 'studio.youtube.com' in url and 'playlist/' in url:
+            playlist_id = CaptionDownloader.extract_playlist_id(url)
+            if playlist_id:
+                return f'https://www.youtube.com/playlist?list={playlist_id}'
+
+        return url
 
     def get_single_video(self, video_url: str) -> Optional[VideoInfo]:
         """Get info for a single video"""
@@ -272,10 +313,20 @@ class CaptionDownloader:
             logger.error(f"Error fetching video {video_url}: {e}")
             return None
 
-    def get_videos_from_urls(self, urls: List[str], max_per_source: int = 100) -> List[VideoInfo]:
+    def get_videos_from_urls(
+        self,
+        urls: List[str],
+        max_per_source: int = 100,
+        force_playlist: bool = False
+    ) -> List[VideoInfo]:
         """
         Get videos from a list of URLs (channels, playlists, or videos).
         Auto-detects URL type and deduplicates results.
+
+        Args:
+            urls: List of YouTube URLs
+            max_per_source: Maximum videos per source
+            force_playlist: If True, treat video+list URLs as playlists
         """
         all_videos = []
         seen_ids = set()
@@ -285,7 +336,20 @@ class CaptionDownloader:
             if not url or url.startswith('#'):
                 continue
 
+            # Convert special URLs (e.g., Studio) to standard format
+            url = self.convert_to_standard_url(url)
+
+            # Detect URL type
             url_type = self.detect_url_type(url)
+
+            # Force playlist mode: if URL has a list parameter, extract as playlist
+            if force_playlist and url_type == 'video' and 'list=' in url:
+                playlist_id = self.extract_playlist_id(url)
+                if playlist_id:
+                    url = f'https://www.youtube.com/playlist?list={playlist_id}'
+                    url_type = 'playlist'
+                    logger.info(f"Forcing playlist mode for: {url[:60]}...")
+
             logger.info(f"Processing {url_type}: {url[:60]}...")
 
             try:
@@ -789,6 +853,8 @@ Environment Variables (set in .env):
     parser.add_argument('--max-per-source', type=int, default=100,
                        help='Max videos per channel/playlist (default: 100)')
     parser.add_argument('--output', '-o', help='Output file path (optional)')
+    parser.add_argument('--as-playlist', action='store_true',
+                       help='Treat video+list URLs as playlists (download all videos)')
     parser.add_argument('--debug', '-d', action='store_true',
                        help='Enable debug output')
 
@@ -846,7 +912,11 @@ Environment Variables (set in .env):
     print(f"\n🔍 Fetching videos from {len(all_urls)} source(s)...")
 
     try:
-        videos = downloader.get_videos_from_urls(all_urls, args.max_per_source)
+        videos = downloader.get_videos_from_urls(
+            all_urls,
+            args.max_per_source,
+            force_playlist=args.as_playlist
+        )
     except Exception as e:
         print(f"\n❌ Error fetching videos: {e}")
         sys.exit(1)

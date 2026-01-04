@@ -91,7 +91,28 @@ python caption_downloader.py --channel URL --batches 2
 
 # Specify output file
 python caption_downloader.py --channel URL --output my_captions.json
+
+# Multiple sources at once
+python caption_downloader.py -u URL1 -u URL2 -u URL3
+
+# Treat video+playlist URLs as playlists (download all videos)
+python caption_downloader.py -u "https://www.youtube.com/watch?v=xxx&list=PLxxx" --as-playlist
 ```
+
+### Supported URL Formats
+
+| Format | Example |
+|--------|---------|
+| Channel (@ handle) | `https://www.youtube.com/@YourChannel` |
+| Channel (ID) | `https://www.youtube.com/channel/UCxxxxx` |
+| Channel (/c/) | `https://www.youtube.com/c/YourChannel` |
+| Playlist | `https://www.youtube.com/playlist?list=PLxxxxx` |
+| YouTube Studio Playlist | `https://studio.youtube.com/playlist/PLxxxxx/videos` |
+| Single Video | `https://www.youtube.com/watch?v=xxxxx` |
+| Short URL | `https://youtu.be/xxxxx` |
+| Shorts | `https://www.youtube.com/shorts/xxxxx` |
+
+**Note:** Video URLs with playlist context (`watch?v=xxx&list=PLxxx`) are treated as single videos by default. Use `--as-playlist` to download the entire playlist instead.
 
 ### Output Format
 
