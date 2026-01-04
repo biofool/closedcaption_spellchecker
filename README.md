@@ -22,6 +22,47 @@ Or manually:
 pip install yt-dlp python-dotenv google-api-python-client google-auth pytest
 ```
 
+## System Requirements
+
+### Required: ffmpeg and ffprobe
+
+yt-dlp requires **ffmpeg** for merging video/audio streams and post-processing. Install the **binary**, not the Python package.
+
+| Platform | Installation |
+|----------|--------------|
+| Windows | Download from [ffmpeg.org](https://ffmpeg.org/download.html) or use `winget install ffmpeg` |
+| macOS | `brew install ffmpeg` |
+| Linux | `sudo apt install ffmpeg` or `sudo dnf install ffmpeg` |
+
+> **Note:** Some ffmpeg versions have bugs affecting yt-dlp. For patched builds, see [yt-dlp/FFmpeg-Builds](https://github.com/yt-dlp/FFmpeg-Builds).
+
+### Recommended: JavaScript Runtime (for yt-dlp-ejs)
+
+YouTube requires JavaScript execution for deciphering video streams. Install one of:
+
+| Runtime | Installation |
+|---------|--------------|
+| Deno (recommended) | [deno.land](https://deno.land/) |
+| Node.js | [nodejs.org](https://nodejs.org/) |
+| Bun | [bun.sh](https://bun.sh/) |
+
+Then install the extractor:
+```bash
+pip install yt-dlp-ejs
+```
+
+### Optional: Networking Dependencies
+
+For better network performance:
+```bash
+pip install certifi brotli websockets requests
+```
+
+- **certifi** - Mozilla's root certificate bundle
+- **brotli** - Brotli content encoding support
+- **websockets** - WebSocket download support
+- **requests** - HTTPS proxy and persistent connections
+
 ## Quick Start
 
 ### 1. Configure Environment
